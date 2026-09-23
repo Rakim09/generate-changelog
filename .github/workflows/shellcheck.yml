@@ -19,7 +19,7 @@ jobs:
           echo "/tmp/shellcheck-v0.11.0" >> "$GITHUB_PATH"
           shellcheck --version
 
-- name: Run ShellCheck
+      - name: Run ShellCheck
         run: shellcheck generate-changelog simple_mr_changelog
 
       - name: Bash syntax check
