@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+
+# Usage: ./generate-notes.sh [source_branch] [target_branch]
+# Example: ./generate-notes.sh uat prod
+
+BASE_BRANCH=${1:-main}
+TARGET_ENV=${2:-uat}
+
+git fetch origin "$BASE_BRANCH" --quiet
+git fetch origin "$TARGET_ENV" --quiet
+
+echo "--- Generating Clean Release Notes: $BASE_BRANCH -> $TARGET_ENV ---"
+echo ""
+
+get_logs() {
+  local pattern=$1
+  git log origin/"$TARGET_ENV"..origin/"$BASE_BRANCH" \
+    --no-merges \
+    --oneline \
+    --grep="$pattern" | sed 's/^[a-f0-9]* / - /'
+}
+
+CHG_FEAT=$(get_logs "^feat")
+CHG_FIX=$(get_logs "^fix")
+CHG_OTHER=$(get_logs "^chore\|^refactor\|^perf\|^docs")
+
+cat <<EOF
+Title: deploy($TARGET_ENV): merge $BASE_BRANCH to $TARGET_ENV 
+
+## Release to ${TARGET_ENV^^}
+This MR promotes changes from **$BASE_BRANCH** to **$TARGET_ENV**.
+
+### Features
+${CHG_FEAT:- - No new features}
+
+### Bug Fixes
+${CHG_FIX:- - No bug fixes}
+
+### Other Changes
+${CHG_OTHER:- - No chores or refactors}
+
+---
+*Generated via git-log (clean) on $(date +'%Y-%m-%d')*
+EOF
+

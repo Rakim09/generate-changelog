@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+
+# ==============================================================================
+# Script: generate-changelog
+# Description: Generates a Markdown changelog from Conventional Commits
+#              for GitLab-flow promotions (main -> uat -> prod)
+# Usage: generate-changelog [base_branch] [target_branch]
+# Example: generate-changelog main uat
+# ==============================================================================
+
+set -euo pipefail
+
+usage() {
+    cat <<EOF
+Usage: generate-changelog [base_branch] [target_branch]
+
+Generates a Markdown changelog listing the commits to promote from
+base_branch into target_branch (GitLab-flow style, e.g. main -> uat).
+
+Options:
+  -h, --help    Show this help message and exit
+
+Arguments:
+  base_branch     Branch that holds the commits to promote, e.g. main (rolling) or uat
+                  default: main
+  target_branch   Branch receiving the changes, e.g. uat or prod
+                  default: uat
+
+Examples:
+  generate-changelog main uat    # commits to promote from main to uat
+  generate-changelog uat prod    # commits to promote from uat to prod
+EOF
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    usage
+    exit 0
+fi
+
+# Default branches if none are provided
+base_branch="${1:-main}"
+target_branch="${2:-uat}"
+
+# Ensure we are inside a Git repo
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "Error: Not inside a Git repository." >&2
+    exit 1
+fi
+
+detect_pr_type() {
+    if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+        echo "Pull Request"
+    elif [[ "${GITLAB_CI:-}" == "true" ]]; then
+        echo "Merge Request"
+    else
+        case "$(git remote get-url origin 2>/dev/null)" in
+            *gitlab*) echo "Merge Request" ;;
+            *github*) echo "Pull Request" ;;
+            *)         echo "Changelog" ;;
+        esac
+    fi
+}
+
+pr_type="$(detect_pr_type)"
+
+# Fetch latest from origin to ensure fresh refs
+git fetch origin "$base_branch" --quiet
+git fetch origin "$target_branch" --quiet
+
+# Retrieve commits in base_branch that are not yet in target_branch
+COMMITS=$(git log "origin/${target_branch}..origin/${base_branch}" --no-merges --format="%h|%s")
+
+if [[ -z "$COMMITS" ]]; then
+    echo "No commits found between \`$base_branch\` and \`$target_branch\`."
+    exit 0
+fi
+
+# Get current date (YYYY-MM-DD)
+CURRENT_DATE=$(date +%Y-%m-%d)
+
+# Process commits and generate Markdown using AWK
+echo "$COMMITS" | awk -F'|' -v curr_date="$CURRENT_DATE" -v pr_type="$pr_type" '
+BEGIN {
+    # Map commit types to titles (no emoticons)
+    title["feat"]     = "Features"
+    title["fix"]      = "Bug Fixes"
+    title["perf"]     = "Performance Improvements"
+    title["refactor"] = "Code Refactoring"
+    title["docs"]     = "Documentation"
+    title["test"]     = "Testing"
+    title["style"]    = "Styles & Formatting"
+    title["build"]    = "Build System"
+    title["ci"]       = "CI/CD"
+    title["chore"]    = "Maintenance & Chores"
+    title["revert"]   = "Reverts"
+    title["other"]    = "Other Changes"
+
+    # Define strict category output order
+    order[1]="feat";  order[2]="fix";     order[3]="perf"
+    order[4]="refactor"; order[5]="docs"; order[6]="test"
+    order[7]="style"; order[8]="build";   order[9]="ci"
+    order[10]="chore"; order[11]="revert"; order[12]="other"
+}
+
+{
+    hash = $1
+    subject = $2
+
+    # Regex matches: type(scope)!: message  OR  type!: message
+    if (match(subject, /^([a-zA-Z0-9_-]+)(\(([^\)]+)\))?!?: (.*)$/, arr)) {
+        type    = tolower(arr[1])
+        scope   = arr[3]
+        message = arr[4]
+
+        # Format scope bold if present
+        if (scope != "") {
+            entry = sprintf("- **%s:** %s (`%s`)", scope, message, hash)
+        } else {
+            entry = sprintf("- %s (`%s`)", message, hash)
+        }
+
+        # Check if type is known, otherwise send to "other"
+        if (type in title) {
+            categories[type] = categories[type] entry "\n"
+        } else {
+            categories["other"] = categories["other"] sprintf("- %s (`%s`)", subject, hash) "\n"
+        }
+    } else {
+        # Non-conventional commit fallback
+        categories["other"] = categories["other"] sprintf("- %s (`%s`)", subject, hash) "\n"
+    }
+}
+
+END {
+    # Output main title with date
+    printf "## %s Changelog (%s)\n\n", pr_type, curr_date
+    
+    for (i = 1; i <= 12; i++) {
+        type_key = order[i]
+        if (type_key in categories && categories[type_key] != "") {
+            printf "### %s\n\n", title[type_key]
+            printf "%s\n", categories[type_key]
+        }
+    }
+}
+'
