@@ -15,7 +15,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y shellcheck
 
       - name: Run ShellCheck
-        run: shellcheck *.sh
+        run: shellcheck *.sh generate-changelog simple_mr_changelog
 
       - name: Bash syntax check
         run: for f in *.sh; do bash -n "$f"; done
