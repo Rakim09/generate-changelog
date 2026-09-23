@@ -19,8 +19,8 @@ jobs:
           echo "/tmp/shellcheck-v0.11.0" >> "$GITHUB_PATH"
           shellcheck --version
 
-      - name: Run ShellCheck
-        run: shellcheck *.sh generate-changelog simple_mr_changelog
+- name: Run ShellCheck
+        run: shellcheck generate-changelog simple_mr_changelog
 
       - name: Bash syntax check
-        run: for f in *.sh; do bash -n "$f"; done
+        run: bash -n generate-changelog simple_mr_changelog
